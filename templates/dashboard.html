@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concurrent Task Scheduler — Dashboard</title>
+  <style>
+    /* ── Reset & Base ──────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+
+    /* ── Header ────────────────────────────────────── */
+    header {
+      background: #1a1d27;
+      border-bottom: 2px solid #2e3250;
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #ffffff;
+    }
+    header h1 span { color: #6c8fff; }
+    #live-badge {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.78rem;
+      color: #8b8fa8;
+    }
+    #live-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: #4caf50;
+      animation: pulse 1.4s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ── Main Layout ───────────────────────────────── */
+    main { padding: 28px 32px; max-width: 1300px; margin: 0 auto; }
+
+    /* ── Stat Cards ────────────────────────────────── */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2e3250;
+      border-radius: 10px;
+      padding: 20px 22px;
+      text-align: center;
+      transition: border-color 0.2s;
+    }
+    .card:hover { border-color: #6c8fff; }
+    .card .label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #6b6f88;
+      margin-bottom: 10px;
+    }
+    .card .value {
+      font-size: 2.2rem;
+      font-weight: 700;
+      line-height: 1;
+      transition: color 0.3s;
+    }
+    /* Per-card accent colors */
+    .card.queue    .value { color: #f9a825; }
+    .card.workers  .value { color: #6c8fff; }
+    .card.completed .value { color: #4caf50; }
+    .card.failed   .value { color: #ef5350; }
+    .card.dlq      .value { color: #ff7043; }
+    .card.throughput .value { color: #26c6da; }
+
+    /* ── Two-column section ────────────────────────── */
+    .bottom-row {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 20px;
+      align-items: start;
+    }
+
+    /* ── Section Titles ────────────────────────────── */
+    .section-title {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #6b6f88;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #2e3250;
+      padding-bottom: 8px;
+    }
+
+    /* ── Jobs Table ────────────────────────────────── */
+    .table-wrap {
+      background: #1a1d27;
+      border: 1px solid #2e3250;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .table-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid #2e3250;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .table-header span { font-size: 0.85rem; font-weight: 600; }
+    #job-count { font-size: 0.75rem; color: #6b6f88; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    thead th {
+      background: #12141e;
+      padding: 10px 14px;
+      text-align: left;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #6b6f88;
+      font-weight: 600;
+    }
+    tbody tr {
+      border-bottom: 1px solid #1e2133;
+      transition: background 0.15s;
+    }
+    tbody tr:hover { background: #1e2133; }
+    tbody tr:last-child { border-bottom: none; }
+    td { padding: 10px 14px; vertical-align: middle; }
+
+    /* ── Status Badges ─────────────────────────────── */
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .badge.PENDING   { background: #2e3250; color: #9e9eb8; }
+    .badge.RUNNING   { background: #1a3a6e; color: #6c8fff; }
+    .badge.COMPLETED { background: #1b3a2b; color: #4caf50; }
+    .badge.FAILED    { background: #3a1b1b; color: #ef5350; }
+    .badge.DLQ       { background: #3a2010; color: #ff7043; }
+
+    /* ── Submit Job Form ───────────────────────────── */
+    .form-panel {
+      background: #1a1d27;
+      border: 1px solid #2e3250;
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .form-panel .section-title { margin-bottom: 16px; }
+
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #6b6f88;
+      margin-bottom: 6px;
+    }
+    .form-group input[type="text"],
+    .form-group input[type="number"],
+    .form-group select {
+      width: 100%;
+      background: #12141e;
+      border: 1px solid #2e3250;
+      border-radius: 6px;
+      color: #e0e0e0;
+      padding: 9px 12px;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus,
+    .form-group select:focus { border-color: #6c8fff; }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .checkbox-row label {
+      font-size: 0.82rem;
+      color: #9e9eb8;
+      cursor: pointer;
+    }
+    input[type="checkbox"] { accent-color: #6c8fff; width: 15px; height: 15px; cursor: pointer; }
+
+    #submit-btn {
+      width: 100%;
+      padding: 10px;
+      background: #6c8fff;
+      border: none;
+      border-radius: 7px;
+      color: #fff;
+      font-size: 0.88rem;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.5px;
+      transition: background 0.2s, transform 0.1s;
+    }
+    #submit-btn:hover  { background: #8aa3ff; }
+    #submit-btn:active { transform: scale(0.98); }
+
+    /* ── Toast notification ────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      background: #1e2133;
+      border: 1px solid #2e3250;
+      border-left: 4px solid #4caf50;
+      border-radius: 8px;
+      padding: 12px 18px;
+      font-size: 0.83rem;
+      color: #e0e0e0;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 0.3s, transform 0.3s;
+      pointer-events: none;
+      max-width: 320px;
+      z-index: 999;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.error { border-left-color: #ef5350; }
+
+    /* ── Log Feed ──────────────────────────────────── */
+    #log-box {
+      margin-top: 20px;
+      background: #12141e;
+      border: 1px solid #2e3250;
+      border-radius: 10px;
+      padding: 14px 16px;
+      max-height: 160px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 0.75rem;
+      color: #6b6f88;
+    }
+    #log-box p { margin-bottom: 3px; }
+    #log-box p span { color: #6c8fff; }
+
+    /* ── Scrollbar ─────────────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #12141e; }
+    ::-webkit-scrollbar-thumb { background: #2e3250; border-radius: 10px; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <h1>⚡ Concurrent Task Scheduler &mdash; <span>Phase 8 Dashboard</span></h1>
+    <div id="live-badge">
+      <div id="live-dot"></div>
+      <span id="last-updated">Connecting…</span>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- Stat Cards -->
+    <div class="cards">
+      <div class="card queue">
+        <div class="label">Queue Size</div>
+        <div class="value" id="c-queue">—</div>
+      </div>
+      <div class="card workers">
+        <div class="label">Active Workers</div>
+        <div class="value" id="c-workers">—</div>
+      </div>
+      <div class="card completed">
+        <div class="label">Completed</div>
+        <div class="value" id="c-completed">—</div>
+      </div>
+      <div class="card failed">
+        <div class="label">Failed</div>
+        <div class="value" id="c-failed">—</div>
+      </div>
+      <div class="card dlq">
+        <div class="label">Dead Letter</div>
+        <div class="value" id="c-dlq">—</div>
+      </div>
+      <div class="card throughput">
+        <div class="label">Throughput / 60s</div>
+        <div class="value" id="c-throughput">—</div>
+      </div>
+    </div>
+
+    <!-- Bottom Row -->
+    <div class="bottom-row">
+
+      <!-- Job Table -->
+      <div>
+        <div class="table-wrap">
+          <div class="table-header">
+            <span>Recent Jobs</span>
+            <span id="job-count">—</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Job ID</th>
+                <th>Priority</th>
+                <th>Status</th>
+                <th>Retries</th>
+                <th>Submitted</th>
+              </tr>
+            </thead>
+            <tbody id="jobs-tbody">
+              <tr><td colspan="6" style="text-align:center;color:#6b6f88;padding:24px;">Waiting for data…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Mini log feed -->
+        <div id="log-box"></div>
+      </div>
+
+      <!-- Submit Job Form -->
+      <div class="form-panel">
+        <div class="section-title">Submit New Job</div>
+
+        <div class="form-group">
+          <label for="f-desc">Description</label>
+          <input type="text" id="f-desc" placeholder="My background task" />
+        </div>
+
+        <div class="form-group">
+          <label for="f-priority">Priority (0 = low, 5 = high)</label>
+          <input type="number" id="f-priority" value="1" min="0" max="10" />
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="f-fail" />
+          <label for="f-fail">Simulate failure (triggers retry / DLQ)</label>
+        </div>
+
+        <button id="submit-btn" onclick="submitJob()">Submit Job</button>
+
+        <!-- Batch submit -->
+        <div style="margin-top:16px;border-top:1px solid #2e3250;padding-top:16px;">
+          <div class="section-title" style="margin-bottom:10px;">Batch Submit</div>
+          <div class="form-group">
+            <label for="f-batch-count">Number of Jobs</label>
+            <input type="number" id="f-batch-count" value="5" min="1" max="50" />
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="f-batch-fail" />
+            <label for="f-batch-fail">20% failure rate</label>
+          </div>
+          <button id="submit-btn" style="background:#ff7043;" onclick="batchSubmit()">Submit Batch</button>
+        </div>
+      </div>
+
+    </div><!-- /bottom-row -->
+  </main>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <!-- ── JavaScript ──────────────────────────────────────────────────────── -->
+  <script>
+    const LOG_MAX = 80;
+    let logLines = [];
+
+    // ── Toast helper ────────────────────────────────────────────────────────
+    function showToast(msg, isError = false) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.className = isError ? "show error" : "show";
+      clearTimeout(el._timer);
+      el._timer = setTimeout(() => { el.className = ""; }, 3500);
+    }
+
+    // ── Log feed helper ──────────────────────────────────────────────────────
+    function addLog(msg) {
+      const now = new Date().toLocaleTimeString();
+      logLines.unshift(`<p><span>[${now}]</span> ${msg}</p>`);
+      if (logLines.length > LOG_MAX) logLines.pop();
+      document.getElementById("log-box").innerHTML = logLines.join("");
+    }
+
+    // ── Status badge ─────────────────────────────────────────────────────────
+    function badge(status) {
+      return `<span class="badge ${status}">${status}</span>`;
+    }
+
+    // ── Fetch + render stats every second ────────────────────────────────────
+    async function fetchStats() {
+      try {
+        const res  = await fetch("/stats");
+        const data = await res.json();
+
+        document.getElementById("c-queue").textContent     = data.queue_size;
+        document.getElementById("c-workers").textContent   = data.active_workers;
+        document.getElementById("c-completed").textContent = data.completed_jobs;
+        document.getElementById("c-failed").textContent    = data.failed_jobs;
+        document.getElementById("c-dlq").textContent       = data.dlq_jobs;
+        document.getElementById("c-throughput").textContent = data.throughput;
+        document.getElementById("last-updated").textContent =
+          "Updated " + new Date().toLocaleTimeString();
+        document.getElementById("job-count").textContent =
+          `${data.total_submitted} total submitted`;
+
+        // Rebuild job rows
+        const tbody = document.getElementById("jobs-tbody");
+        if (!data.jobs || data.jobs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#6b6f88;padding:24px;">
+            No jobs yet. Submit one using the form →</td></tr>`;
+        } else {
+          tbody.innerHTML = data.jobs.map(j => `
+            <tr>
+              <td>${j.task_index}</td>
+              <td style="font-family:monospace;font-size:0.78rem;color:#6b6f88">${j.job_id}…</td>
+              <td>${j.priority}</td>
+              <td>${badge(j.status)}</td>
+              <td>${j.retry_count}</td>
+              <td style="color:#6b6f88">${j.created_at}</td>
+            </tr>`).join("");
+        }
+      } catch (err) {
+        document.getElementById("last-updated").textContent = "Connection error";
+        addLog("⚠ Could not reach /stats — is the server running?");
+      }
+    }
+
+    // ── Submit single job ────────────────────────────────────────────────────
+    async function submitJob() {
+      const desc     = document.getElementById("f-desc").value.trim() || "API task";
+      const priority = parseInt(document.getElementById("f-priority").value) || 0;
+      const fail     = document.getElementById("f-fail").checked;
+
+      try {
+        const res  = await fetch("/jobs", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ description: desc, priority, should_fail: fail }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(`✔ Job #${data.task_index} submitted (${data.job_id.slice(0,8)}…)`);
+          addLog(`Submitted Job #${data.task_index} priority=${priority} fail=${fail}`);
+        } else {
+          showToast(`Error: ${data.error}`, true);
+        }
+      } catch (err) {
+        showToast("Network error — could not submit job.", true);
+      }
+    }
+
+    // ── Submit batch of jobs ─────────────────────────────────────────────────
+    async function batchSubmit() {
+      const count     = parseInt(document.getElementById("f-batch-count").value) || 5;
+      const mixedFail = document.getElementById("f-batch-fail").checked;
+      let submitted   = 0;
+
+      for (let i = 0; i < count; i++) {
+        const shouldFail = mixedFail && Math.random() < 0.2;
+        const priority   = Math.floor(Math.random() * 5);
+        await fetch("/jobs", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({
+            description:  `Batch task ${i + 1}`,
+            priority,
+            should_fail:  shouldFail,
+          }),
+        });
+        submitted++;
+      }
+      showToast(`✔ Batch of ${submitted} jobs submitted!`);
+      addLog(`Batch submitted: ${submitted} jobs (failure_mix=${mixedFail})`);
+    }
+
+    // ── Bootstrap ────────────────────────────────────────────────────────────
+    fetchStats();                          // immediate first fetch
+    setInterval(fetchStats, 1000);         // poll every 1 s
+
+    // Allow Enter key on form inputs
+    document.querySelectorAll("input").forEach(el => {
+      el.addEventListener("keydown", e => { if (e.key === "Enter") submitJob(); });
+    });
+  </script>
+</body>
+</html>

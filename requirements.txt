@@ -1,0 +1,10 @@
+# Core dependencies
+flask>=3.0.0           # Phase 8: Monitoring dashboard API + frontend
+
+# Test and development dependencies
+pytest>=7.0.0
+
+# Future dependencies (to be uncommented in later phases):
+# redis>=5.0.0          # For distributed worker queue and persistence broker
+# gunicorn>=21.0.0      # Production WSGI server
+# pydantic>=2.0.0       # Strict job model payload validation
